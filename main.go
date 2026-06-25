@@ -3,8 +3,10 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 
@@ -32,7 +34,8 @@ func initDB(db *sql.DB) error {
 
 	CREATE TABLE IF NOT EXISTS uploads (
 		uuid TEXT PRIMARY KEY,
-		image_name TEXT NOT NULL
+		image_name TEXT NOT NULL,
+		range_end INTEGER NOT NULL DEFAULT 0
 	);
 	`
 
@@ -96,6 +99,63 @@ func startBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func handleBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		id := r.PathValue("uuid")
+
+		var uploadId string
+		var rangeEnd int
+		err := db.QueryRow("SELECT uuid, range_end FROM uploads WHERE uuid = ?", id).Scan(&uploadId, &rangeEnd)
+		if err == sql.ErrNoRows {
+			w.WriteHeader(404)
+			return
+		}
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		file, err := os.OpenFile(path.Join("blobs", "uploads", id), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		defer file.Close()
+
+		buffer, err := io.ReadAll(r.Body)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		_, err = file.Write(buffer)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		var newRangeEnd = len(buffer) + rangeEnd
+		_, err = db.Exec("UPDATE uploads SET range_end = ? WHERE uuid = ?", newRangeEnd, id)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		w.Header().Add("Location", fmt.Sprintf("/v2/%s/blobs/uploads/%s", name, id))
+		w.Header().Add("Range", fmt.Sprintf("0-%d", newRangeEnd-1))
+		w.Header().Add("Docker-Upload-UUID", id)
+
+		w.WriteHeader(204)
+	}
+}
+
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
@@ -118,6 +178,7 @@ func main() {
 	mux.HandleFunc("GET /v2/", handshake)
 	mux.HandleFunc("HEAD /v2/{name}/blobs/{digest}", getBlobByDigest)
 	mux.HandleFunc("POST /v2/{name}/blobs/uploads/", startBlobUpload(db))
+	mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", handleBlobUpload(db))
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
 	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
