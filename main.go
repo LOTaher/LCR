@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	_ "github.com/mattn/go-sqlite3"
@@ -23,7 +24,7 @@ func initDB(db *sql.DB) error {
 	createCommand := `
 	CREATE TABLE IF NOT EXISTS images (
 		digest TEXT PRIMARY KEY,
-		manifest JSON NOT NULL
+		manifest TEXT NOT NULL
 	);
 
 	CREATE TABLE IF NOT EXISTS tags (
@@ -223,6 +224,43 @@ func completeBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request)
 	}
 }
 
+func handleManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		reference := r.PathValue("reference")
+
+		buffer, err := io.ReadAll(r.Body)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		bodyDigest := sha256.Sum256(buffer)
+		digestString := fmt.Sprintf("sha256:%x", bodyDigest)
+
+		_, err = db.Exec("INSERT INTO images (digest, manifest) VALUES (?, ?)", digestString, string(buffer))
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		if !strings.HasPrefix(reference, "sha256:") {
+			_, err = db.Exec("INSERT INTO tags (image_name, tag_name, digest) VALUES (?, ?, ?) ON CONFLICT(image_name, tag_name) DO UPDATE SET digest=excluded.digest", name, reference, digestString)
+			if err != nil {
+				fmt.Println(err.Error())
+				w.WriteHeader(500)
+				return
+			}
+		}
+
+		w.Header().Add("Docker-Content-Digest", digestString)
+		w.Header().Set("Location", fmt.Sprintf("/v2/%s/manifests/%s", name, reference))
+		w.WriteHeader(201)
+	}
+}
+
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
@@ -249,6 +287,7 @@ func main() {
 	mux.HandleFunc("POST /v2/{name}/blobs/uploads/", startBlobUpload(db))
 	mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", handleBlobUpload(db))
 	mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", completeBlobUpload(db))
+	mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", handleManifest(db))
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
 	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
