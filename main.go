@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"io"
@@ -156,6 +157,72 @@ func handleBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func completeBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		id := r.PathValue("uuid")
+		digest := r.URL.Query().Get("digest")
+
+		if digest == "" {
+			w.WriteHeader(400)
+			return
+		}
+
+		var uploadId string
+		err := db.QueryRow("SELECT uuid FROM uploads WHERE uuid = ?", id).Scan(&uploadId)
+		if err == sql.ErrNoRows {
+			w.WriteHeader(404)
+			return
+		}
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		file, err := os.Open(path.Join("blobs", "uploads", id))
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+		defer file.Close()
+
+		bytes, err := io.ReadAll(file)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		fileDigest := sha256.Sum256(bytes)
+		digestString := fmt.Sprintf("sha256:%x", fileDigest)
+
+		if digestString != digest {
+			w.WriteHeader(400)
+			return
+		}
+
+		err = os.Rename(path.Join("blobs", "uploads", id), path.Join("blobs", digestString))
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		_, err = db.Exec("DELETE FROM uploads WHERE uuid = ?", id)
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		w.Header().Add("Docker-Content-Digest", digestString)
+		w.Header().Add("Location", fmt.Sprintf("/v2/%s/blobs/%s", name, digestString))
+		w.WriteHeader(201)
+	}
+}
+
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
@@ -176,9 +243,12 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /v2/", handshake)
+
+	// Push
 	mux.HandleFunc("HEAD /v2/{name}/blobs/{digest}", getBlobByDigest)
 	mux.HandleFunc("POST /v2/{name}/blobs/uploads/", startBlobUpload(db))
 	mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", handleBlobUpload(db))
+	mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", completeBlobUpload(db))
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
 	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
