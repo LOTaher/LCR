@@ -228,7 +228,7 @@ func handleManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 		bodyDigest := sha256.Sum256(buffer)
 		digestString := fmt.Sprintf("sha256:%x", bodyDigest)
 
-		_, err = db.Exec("INSERT INTO images (digest, manifest) VALUES (?, ?)", digestString, string(buffer))
+		_, err = db.Exec("INSERT INTO images (digest, manifest) VALUES (?, ?) ON CONFLICT(digest) DO NOTHING", digestString, string(buffer))
 		if err != nil {
 			fmt.Println(err.Error())
 			w.WriteHeader(500)
@@ -298,6 +298,31 @@ func getManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func sendBlobByDigest(w http.ResponseWriter, r *http.Request) {
+	digest := r.PathValue("digest")
+
+	fileInfo, err := os.Stat(filepath.Join("blobs", digest))
+	if err != nil {
+		w.WriteHeader(404)
+		return
+	}
+
+	file, err := os.Open(filepath.Join("blobs", digest))
+	if err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(500)
+		return
+	}
+
+	defer file.Close()
+
+	w.Header().Add("Docker-Content-Digest", digest)
+	w.Header().Add("Content-Type", "application/octet-stream")
+	w.Header().Add("Content-Length", strconv.Itoa(int(fileInfo.Size())))
+	w.WriteHeader(200)
+	io.Copy(w, file)
+}
+
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
@@ -328,6 +353,7 @@ func main() {
 
 	// Pull
 	mux.HandleFunc("GET /v2/{name}/manifests/{reference}", getManifest(db))
+	mux.HandleFunc("GET /v2/{name}/blobs/{digest}", sendBlobByDigest)
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
 	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
