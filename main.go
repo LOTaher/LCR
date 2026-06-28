@@ -51,17 +51,6 @@ func initDB(db *sql.DB) error {
 	return nil
 }
 
-// Helpers
-
-func getBlob(digest string) (int64, error) {
-	file, err := os.Stat(filepath.Join("blobs", digest))
-	if err != nil {
-		return 0, fmt.Errorf("digest %s not found", digest)
-	}
-
-	return file.Size(), nil
-}
-
 // Handlers
 
 func handshake(w http.ResponseWriter, r *http.Request) {
@@ -73,13 +62,13 @@ func handshake(w http.ResponseWriter, r *http.Request) {
 func getBlobByDigest(w http.ResponseWriter, r *http.Request) {
 	digest := r.PathValue("digest")
 
-	size, err := getBlob(digest)
+	file, err := os.Stat(filepath.Join("blobs", digest))
 	if err != nil {
 		w.WriteHeader(404)
 		return
 	}
 
-	w.Header().Set("Content-Length", strconv.Itoa(int(size)))
+	w.Header().Set("Content-Length", strconv.Itoa(int(file.Size())))
 	w.Header().Set("Docker-Content-Digest", digest)
 	w.WriteHeader(200)
 }
@@ -261,6 +250,54 @@ func handleManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func getManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reference := r.PathValue("reference")
+
+		var manifest string
+		var digest string
+		if !strings.HasPrefix(reference, "sha256:") {
+			err := db.QueryRow("SELECT digest FROM tags WHERE tag_name = ?", reference).Scan(&digest)
+			if err == sql.ErrNoRows {
+				w.WriteHeader(404)
+				return
+			}
+			if err != nil {
+				fmt.Println(err.Error())
+				w.WriteHeader(500)
+				return
+			}
+			err = db.QueryRow("SELECT manifest FROM images WHERE digest = ?", digest).Scan(&manifest)
+			if err == sql.ErrNoRows {
+				w.WriteHeader(404)
+				return
+			}
+			if err != nil {
+				fmt.Println(err.Error())
+				w.WriteHeader(500)
+				return
+			}
+		} else {
+			digest = reference
+			err := db.QueryRow("SELECT manifest FROM images WHERE digest = ?", digest).Scan(&manifest)
+			if err == sql.ErrNoRows {
+				w.WriteHeader(404)
+				return
+			}
+			if err != nil {
+				fmt.Println(err.Error())
+				w.WriteHeader(500)
+				return
+			}
+		}
+
+		w.Header().Add("Docker-Content-Digest", digest)
+		w.Header().Add("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
+		w.WriteHeader(200)
+		fmt.Fprint(w, manifest)
+	}
+}
+
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
@@ -288,6 +325,9 @@ func main() {
 	mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", handleBlobUpload(db))
 	mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", completeBlobUpload(db))
 	mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", handleManifest(db))
+
+	// Pull
+	mux.HandleFunc("GET /v2/{name}/manifests/{reference}", getManifest(db))
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
 	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
