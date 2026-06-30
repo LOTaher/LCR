@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>registry.splatte.dev</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+
+  <body class="max-w-2xl flex flex-col md:flex-row mx-4 mt-4 lg:mx-auto">
+    <main class="flex-auto min-w-0 mt-6 flex flex-col px-2 md:px-0">
+      <div class="flex justify-between gap-5">
+        <h1 class="mb-8">registry.splatte.dev</h1>
+        <div>
+          <p>
+            <a
+              href="https://splatte.dev"
+              class="underline hover:text-neutral-500"
+              >home</a
+            >
+            |
+            <a
+              href="https://git.splatte.dev/LCR.git"
+              target="_blank"
+              class="hover:text-neutral-500 underline"
+              >repository</a
+            >
+          </p>
+        </div>
+      </div>
+      <main class="flex justify-center mb-4">
+        <div class="h-full w-full md:max-w-2xl">
+          <div class="content-start flex-col">
+            <div class="mb-8">
+              <h1 class="text-2xl font-medium tracking-tighter">
+                laith's container registry
+              </h1>
+            </div>
+
+            <!-- Usage -->
+            <div class="mb-8">
+              <h1 class="text-xl font-medium mb-2">usage</h1>
+              <pre
+                class="bg-neutral-100 rounded-lg p-3 text-sm overflow-x-auto"
+              >
+docker pull registry.splatte.dev/&lt;image&gt;:&lt;tag&gt;</pre
+              >
+            </div>
+
+            <h1 class="text-xl font-medium mb-2">images</h1>
+
+            {{ if .Images }}
+            <div class="flex flex-col gap-3 mb-8">
+              {{ range .Images }}
+              <div
+                class="border border-neutral-200 rounded-lg px-4 py-3 flex justify-between items-center gap-4"
+              >
+                <div class="min-w-0">
+                  <p class="text-md font-medium">
+                    {{ .ImageName }}<span class="text-neutral-400">:</span>{{
+                    .TagName }}
+                  </p>
+                  <p class="text-xs text-neutral-500 font-mono truncate">
+                    {{ .Digest }}
+                  </p>
+                </div>
+                <button
+                  class="shrink-0 text-neutral-500 hover:text-black hover:cursor-pointer copy-btn"
+                  data-copy="docker pull registry.splatte.dev/{{ .ImageName }}:{{ .TagName }}"
+                  title="copy pull command"
+                >
+                  <svg
+                    class="copy-icon w-4 h-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path
+                      d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"
+                    />
+                  </svg>
+                  <svg
+                    class="check-icon w-4 h-4 hidden"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </button>
+              </div>
+              {{ end }}
+            </div>
+            {{ else }}
+            <p class="text-sm text-neutral-500 mb-8">no images pushed yet</p>
+            {{ end }}
+
+            <hr />
+
+            <!-- Footer (same as main site) -->
+            <div class="flex justify-between mt-4 items-center gap-5">
+              <div class="w-3/5">
+                <p class="text-sm">
+                  Brought to you by my home lab under the skies of Boston,
+                  Massachusetts
+                </p>
+              </div>
+              <div class="flex gap-2">
+                <a href="https://www.freebsd.org/" target="_blank">
+                  <img src="https://splatte.dev/images/powerani.gif" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </main>
+
+    <script>
+      document.querySelectorAll(".copy-btn").forEach((btn) => {
+        const copyIcon = btn.querySelector(".copy-icon");
+        const checkIcon = btn.querySelector(".check-icon");
+        btn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(btn.dataset.copy);
+            copyIcon.classList.add("hidden");
+            checkIcon.classList.remove("hidden");
+          } catch (err) {}
+          setTimeout(() => {
+            checkIcon.classList.add("hidden");
+            copyIcon.classList.remove("hidden");
+          }, 1500);
+        });
+      });
+    </script>
+  </body>
+</html>

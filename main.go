@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +18,8 @@ import (
 )
 
 const PORT = 6769
+const LCR_USERNAME = "admin"
+const LCR_PASSWORD = "secret"
 
 // DB
 
@@ -323,6 +326,54 @@ func sendBlobByDigest(w http.ResponseWriter, r *http.Request) {
 	io.Copy(w, file)
 }
 
+type ImageWithTag struct {
+	ImageName string
+	TagName   string
+	Digest    string
+}
+
+type HomePageData struct {
+	Images []ImageWithTag
+}
+
+func renderHomePage(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		images := make([]ImageWithTag, 0, 50)
+		rows, err := db.Query("SELECT image_name, tag_name, digest FROM tags")
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var name, tag, digest string
+			err := rows.Scan(&name, &tag, &digest)
+			if err != nil {
+				fmt.Println(err.Error())
+				w.WriteHeader(500)
+				return
+			}
+
+			images = append(images, ImageWithTag{name, tag, digest})
+		}
+
+		data := HomePageData{
+			Images: images,
+		}
+
+		tmpl, err := template.ParseFiles("templates/index.html")
+		if err != nil {
+			fmt.Println(err.Error())
+			w.WriteHeader(500)
+			return
+		}
+
+		tmpl.Execute(w, data)
+	}
+}
+
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
@@ -342,6 +393,10 @@ func main() {
 	// Init HTTP
 	mux := http.NewServeMux()
 
+	// Page
+	mux.HandleFunc("/", renderHomePage(db))
+
+	// Registry
 	mux.HandleFunc("GET /v2/", handshake)
 
 	// Push
@@ -354,6 +409,9 @@ func main() {
 	// Pull
 	mux.HandleFunc("GET /v2/{name}/manifests/{reference}", getManifest(db))
 	mux.HandleFunc("GET /v2/{name}/blobs/{digest}", sendBlobByDigest)
+
+	// TODO misc
+	// tags list route: GET /v2/<name>/tags/list
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
 	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
