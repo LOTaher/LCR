@@ -19,8 +19,13 @@ func GetBlobByDigest(w http.ResponseWriter, r *http.Request) {
 	digest := r.PathValue("digest")
 
 	file, err := os.Stat(filepath.Join("blobs", digest))
+	if os.IsNotExist(err) {
+		writeError(w, 404, ErrCodeBlobUnknown, "blob unknown to registry")
+		return
+	}
 	if err != nil {
-		w.WriteHeader(404)
+		fmt.Println(err.Error())
+		writeError(w, 500, ErrCodeUnknown, "internal server error")
 		return
 	}
 
@@ -35,7 +40,8 @@ func StartBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 
 		id, err := service.CreateUpload(db, name)
 		if err != nil {
-			w.WriteHeader(500)
+			fmt.Println(err.Error())
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -52,19 +58,19 @@ func HandleBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 
 		rangeEnd, err := service.GetUploadRangeEnd(db, id)
 		if err == sql.ErrNoRows {
-			w.WriteHeader(404)
+			writeError(w, 404, ErrCodeBlobUploadUnknown, "blob upload unknown")
 			return
 		}
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
 		file, err := os.OpenFile(path.Join("blobs", "uploads", id), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -73,14 +79,14 @@ func HandleBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 		buffer, err := io.ReadAll(r.Body)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
 		_, err = file.Write(buffer)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -88,7 +94,7 @@ func HandleBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 		err = service.UpdateUploadRangeEnd(db, id, newRangeEnd)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -107,25 +113,25 @@ func CompleteBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request)
 		digest := r.URL.Query().Get("digest")
 
 		if digest == "" {
-			w.WriteHeader(400)
+			writeError(w, 400, ErrCodeDigestInvalid, "digest not provided")
 			return
 		}
 
 		err := service.UploadExists(db, id)
 		if err == sql.ErrNoRows {
-			w.WriteHeader(404)
+			writeError(w, 404, ErrCodeBlobUploadUnknown, "blob upload unknown")
 			return
 		}
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
 		file, err := os.Open(path.Join("blobs", "uploads", id))
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 		defer file.Close()
@@ -133,7 +139,7 @@ func CompleteBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request)
 		bytes, err := io.ReadAll(file)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -141,21 +147,21 @@ func CompleteBlobUpload(db *sql.DB) func(w http.ResponseWriter, r *http.Request)
 		digestString := fmt.Sprintf("sha256:%x", fileDigest)
 
 		if digestString != digest {
-			w.WriteHeader(400)
+			writeError(w, 400, ErrCodeDigestInvalid, "provided digest did not match uploaded content")
 			return
 		}
 
 		err = os.Rename(path.Join("blobs", "uploads", id), path.Join("blobs", digestString))
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
 		err = service.DeleteUpload(db, id)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -173,7 +179,7 @@ func HandleManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 		buffer, err := io.ReadAll(r.Body)
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -183,7 +189,7 @@ func HandleManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 		err = service.InsertImage(db, digestString, string(buffer))
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -191,7 +197,7 @@ func HandleManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 			err = service.UpsertTag(db, name, reference, digestString)
 			if err != nil {
 				fmt.Println(err.Error())
-				w.WriteHeader(500)
+				writeError(w, 500, ErrCodeUnknown, "internal server error")
 				return
 			}
 		}

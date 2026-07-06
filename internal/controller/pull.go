@@ -23,12 +23,12 @@ func GetManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(reference, "sha256:") {
 			digest, err = service.GetDigestByTag(db, reference)
 			if err == sql.ErrNoRows {
-				w.WriteHeader(404)
+				writeError(w, 404, ErrCodeManifestUnknown, "manifest unknown")
 				return
 			}
 			if err != nil {
 				fmt.Println(err.Error())
-				w.WriteHeader(500)
+				writeError(w, 500, ErrCodeUnknown, "internal server error")
 				return
 			}
 		} else {
@@ -37,12 +37,12 @@ func GetManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 
 		manifest, err := service.GetManifestByDigest(db, digest)
 		if err == sql.ErrNoRows {
-			w.WriteHeader(404)
+			writeError(w, 404, ErrCodeManifestUnknown, "manifest unknown")
 			return
 		}
 		if err != nil {
 			fmt.Println(err.Error())
-			w.WriteHeader(500)
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
 			return
 		}
 
@@ -57,15 +57,20 @@ func SendBlobByDigest(w http.ResponseWriter, r *http.Request) {
 	digest := r.PathValue("digest")
 
 	fileInfo, err := os.Stat(filepath.Join("blobs", digest))
+	if os.IsNotExist(err) {
+		writeError(w, 404, ErrCodeBlobUnknown, "blob unknown to registry")
+		return
+	}
 	if err != nil {
-		w.WriteHeader(404)
+		fmt.Println(err.Error())
+		writeError(w, 500, ErrCodeUnknown, "internal server error")
 		return
 	}
 
 	file, err := os.Open(filepath.Join("blobs", digest))
 	if err != nil {
 		fmt.Println(err.Error())
-		w.WriteHeader(500)
+		writeError(w, 500, ErrCodeUnknown, "internal server error")
 		return
 	}
 
