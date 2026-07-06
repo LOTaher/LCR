@@ -20,6 +20,11 @@ const LCR_PASSWORD = "secret"
 // https://github.com/opencontainers/distribution-spec/blob/main/spec.md
 
 func main() {
+	// Init blob storage
+	if err := os.MkdirAll("blobs/uploads", 0755); err != nil {
+		panic(err)
+	}
+
 	// Init DB
 	database, err := sql.Open("sqlite3", "./lcr.db")
 	if err != nil {
