@@ -7,8 +7,6 @@ CREATE TABLE IF NOT EXISTS tags (
 	image_name TEXT NOT NULL,
 	tag_name TEXT NOT NULL,
 	digest TEXT NOT NULL REFERENCES images(digest),
-	downloads INTEGER NOT NULL DEFAULT 0,
-	updated_at TEXT NOT NULL,
 	PRIMARY KEY (image_name, tag_name)
 );
 
