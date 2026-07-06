@@ -46,6 +46,13 @@ func GetManifest(db *sql.DB) func(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		err = service.IncrementTagDownload(db, reference)
+		if err != nil {
+			fmt.Println(err.Error())
+			writeError(w, 500, ErrCodeUnknown, "internal server error")
+			return
+		}
+
 		w.Header().Add("Docker-Content-Digest", digest)
 		w.Header().Add("Content-Type", "application/vnd.docker.distribution.manifest.v2+json")
 		w.WriteHeader(200)

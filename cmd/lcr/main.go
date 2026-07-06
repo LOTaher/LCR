@@ -10,7 +10,7 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 
 	"lcr/internal/controller"
-	"lcr/internal/service"
+	"lcr/internal/db"
 )
 
 const PORT = 6769
@@ -21,36 +21,36 @@ const LCR_PASSWORD = "secret"
 
 func main() {
 	// Init DB
-	db, err := sql.Open("sqlite3", "./lcr.db")
+	database, err := sql.Open("sqlite3", "./lcr.db")
 	if err != nil {
 		panic(err)
 	}
 
-	err = service.InitDB(db)
+	err = db.Init(database)
 	if err != nil {
 		panic(err)
 	}
 
-	defer db.Close()
+	defer database.Close()
 
 	// Init HTTP
 	mux := http.NewServeMux()
 
 	// Page
-	mux.HandleFunc("/", controller.RenderHomePage(db))
+	mux.HandleFunc("/", controller.RenderHomePage(database))
 
 	// Registry
 	mux.HandleFunc("GET /v2/", controller.Handshake)
 
 	// Push
 	mux.HandleFunc("HEAD /v2/{name}/blobs/{digest}", controller.GetBlobByDigest)
-	mux.HandleFunc("POST /v2/{name}/blobs/uploads/", controller.StartBlobUpload(db))
-	mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", controller.HandleBlobUpload(db))
-	mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", controller.CompleteBlobUpload(db))
-	mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", controller.HandleManifest(db))
+	mux.HandleFunc("POST /v2/{name}/blobs/uploads/", controller.StartBlobUpload(database))
+	mux.HandleFunc("PATCH /v2/{name}/blobs/uploads/{uuid}", controller.HandleBlobUpload(database))
+	mux.HandleFunc("PUT /v2/{name}/blobs/uploads/{uuid}", controller.CompleteBlobUpload(database))
+	mux.HandleFunc("PUT /v2/{name}/manifests/{reference}", controller.HandleManifest(database))
 
 	// Pull
-	mux.HandleFunc("GET /v2/{name}/manifests/{reference}", controller.GetManifest(db))
+	mux.HandleFunc("GET /v2/{name}/manifests/{reference}", controller.GetManifest(database))
 	mux.HandleFunc("GET /v2/{name}/blobs/{digest}", controller.SendBlobByDigest)
 
 	// TODO misc
