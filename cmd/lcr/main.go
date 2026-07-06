@@ -57,7 +57,8 @@ func main() {
 	// tags list route: GET /v2/<name>/tags/list
 
 	fmt.Printf("LCR Listening on %d\n", PORT)
-	http.ListenAndServe(":"+strconv.Itoa(PORT), mux)
-
-	os.Exit(0)
+	if err := http.ListenAndServe(":"+strconv.Itoa(PORT), mux); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
